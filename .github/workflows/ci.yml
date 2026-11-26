@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web app (Lovable) — test & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run build
+
+  ios:
+    name: iOS — test, build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Core tests (incl. real generated video files)
+        working-directory: ios/Packages/DeliciousCore
+        run: swift test 2>&1 | tee ../../core-tests.log
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Build app (unsigned)
+        working-directory: ios
+        env:
+          TIDY_OVERRIDE: ${{ vars.TIDY_ENDPOINT }}
+        run: |
+          mkdir -p build
+          EXTRA=()
+          if [ -n "$TIDY_OVERRIDE" ]; then EXTRA+=("TIDY_ENDPOINT=$TIDY_OVERRIDE"); fi
+          xcodebuild \
+            -project Delicious.xcodeproj \
+            -scheme Delicious \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            "${EXTRA[@]}" \
+            build | tee build/xcodebuild.log | grep -E "error:|warning: .*Delicious/|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/DerivedData/Build/Products/Release-iphoneos/Delicious.app
+
+      - name: Package IPA
+        working-directory: ios/build
+        run: |
+          rm -rf Payload Delicious.ipa
+          mkdir Payload
+          cp -R DerivedData/Build/Products/Release-iphoneos/Delicious.app Payload/
+          /usr/bin/plutil -p Payload/Delicious.app/Info.plist | head -40
+          zip -qry Delicious.ipa Payload
+          ls -lh Delicious.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Delicious-ipa
+          path: ios/build/Delicious.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-logs
+          path: |
+            ios/build/xcodebuild.log
+            ios/core-tests.log
+          if-no-files-found: ignore
