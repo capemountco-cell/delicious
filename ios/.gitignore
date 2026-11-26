@@ -1,0 +1,6 @@
+*.xcodeproj/
+Delicious/Info.plist
+build/
+.build/
+.swiftpm/
+DerivedData/
