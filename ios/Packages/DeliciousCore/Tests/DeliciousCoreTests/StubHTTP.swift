@@ -29,12 +29,11 @@ final class StubHTTP: HTTPClient, @unchecked Sendable {
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        lock.lock()
-        requests.append(request)
         let url = request.url!
-        let match = routes.first { url.absoluteString.hasPrefix($0.prefix) }
-        let fail = failAll
-        lock.unlock()
+        let (match, fail) = lock.withLock { () -> ((prefix: String, reply: Reply)?, Bool) in
+            requests.append(request)
+            return (routes.first { url.absoluteString.hasPrefix($0.prefix) }, failAll)
+        }
         if fail { throw URLError(.notConnectedToInternet) }
         guard let match else {
             return (Data(), HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!)

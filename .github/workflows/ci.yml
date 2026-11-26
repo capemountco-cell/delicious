@@ -33,7 +33,9 @@ jobs:
 
       - name: Core tests (incl. real generated video files)
         working-directory: ios/Packages/DeliciousCore
-        run: swift test 2>&1 | tee ../../core-tests.log
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee ../../core-tests.log
 
       - name: Install XcodeGen
         run: brew install xcodegen
